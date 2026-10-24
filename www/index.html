@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1113">
+  <title>Gym Log</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/chart.umd.min.js" defer></script>
+  <script src="db.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+
+<!-- ============ APP ============ -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand small"><span class="brand-mark">▲</span> Gym Log</div>
+    <button class="chip ghost" id="data-btn">Backup &amp; export</button>
+  </header>
+
+  <main>
+    <!-- LOG -->
+    <section id="view-log" class="view">
+      <div class="date-nav">
+        <button class="icon-btn" id="day-prev" aria-label="Previous day">‹</button>
+        <button class="date-label" id="day-label"></button>
+        <button class="icon-btn" id="day-next" aria-label="Next day">›</button>
+        <input type="date" id="day-picker" class="visually-hidden" tabindex="-1">
+      </div>
+
+      <div class="cats" id="cats"></div>
+
+      <div class="ex-head">
+        <span class="section-title">Exercise</span>
+        <button class="link" id="edit-ex-toggle">Edit</button>
+      </div>
+      <div class="ex-list" id="ex-list"></div>
+
+      <div class="entry card" id="entry" hidden>
+        <div class="entry-title">
+          <strong id="entry-name"></strong>
+          <span class="muted small" id="entry-last"></span>
+        </div>
+        <div class="steppers">
+          <div class="stepper" data-field="sets" data-step="1" data-min="1" data-max="20">
+            <span class="stepper-label">Sets</span>
+            <div class="stepper-row">
+              <button type="button" class="step" data-dir="-1">−</button>
+              <input inputmode="numeric" id="in-sets" value="3">
+              <button type="button" class="step" data-dir="1">+</button>
+            </div>
+          </div>
+          <div class="stepper" data-field="reps" data-step="1" data-min="1" data-max="999">
+            <span class="stepper-label">Reps</span>
+            <div class="stepper-row">
+              <button type="button" class="step" data-dir="-1">−</button>
+              <input inputmode="numeric" id="in-reps" value="10">
+              <button type="button" class="step" data-dir="1">+</button>
+            </div>
+          </div>
+          <div class="stepper" data-field="weight" data-step="2.5" data-min="0" data-max="1000">
+            <span class="stepper-label">Weight (kg)</span>
+            <div class="stepper-row">
+              <button type="button" class="step" data-dir="-1">−</button>
+              <input inputmode="decimal" id="in-weight" value="20">
+              <button type="button" class="step" data-dir="1">+</button>
+            </div>
+          </div>
+        </div>
+        <button class="btn primary block big" id="add-sets">Add sets</button>
+      </div>
+
+      <div class="section-title day-title" id="day-title">Today's sets</div>
+      <div id="day-log"></div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="view-history" class="view" hidden>
+      <h2 class="view-title">History</h2>
+      <div id="history-list"></div>
+      <button class="btn block ghost" id="history-more" hidden>Load more</button>
+    </section>
+
+    <!-- STATS -->
+    <section id="view-stats" class="view" hidden>
+      <div class="view-head">
+        <h2 class="view-title">Progress</h2>
+        <button class="link" id="goals-btn">Goals</button>
+      </div>
+
+      <!-- What should I do this week / today -->
+      <div class="card week-card">
+        <div class="card-title">This week <span class="muted small" id="week-range"></span></div>
+        <div class="week-top">
+          <div class="week-count"><strong id="week-done">0</strong><span class="muted">/ <span id="week-goal">4</span> workouts</span></div>
+          <div class="week-days" id="week-days"></div>
+        </div>
+        <div class="next-up" id="next-up" hidden></div>
+        <div class="cat-week" id="cat-week"></div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <!-- Am I getting stronger? -->
+      <div class="card">
+        <div class="card-title">Recent PRs <span class="muted small">last 30 days</span></div>
+        <div id="pr-feed"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Your lifts</div>
+        <div class="cats lift-filter" id="lift-filter"></div>
+        <div id="lifts"></div>
+        <p class="muted small footnote">Strength is your estimated 1-rep max from the best set of each session
+          (weight × (1 + reps ÷ 30)), so 80 kg × 8 and 90 kg × 5 compare fairly. Bodyweight moves track reps.</p>
+      </div>
+
+      <!-- Am I showing up? -->
+      <div class="card">
+        <div class="card-title">Consistency <span class="muted small">last 16 weeks</span></div>
+        <div class="heat-wrap">
+          <div class="heat-days"><span>M</span><span></span><span>W</span><span></span><span>F</span><span></span><span>S</span></div>
+          <div class="heatmap" id="heatmap"></div>
+        </div>
+        <div class="heat-legend muted small">Fewer <i class="cell"></i><i class="cell l1"></i><i class="cell l2"></i><i class="cell l3"></i> More sets</div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-view="log"><span class="tab-ico">＋</span>Log</button>
+    <button class="tab" data-view="history"><span class="tab-ico">☰</span>History</button>
+    <button class="tab" data-view="stats"><span class="tab-ico">↗</span>Progress</button>
+  </nav>
+</div>
+
+<!-- ============ DIALOGS ============ -->
+<dialog id="dlg-exercise">
+  <form method="dialog" id="form-exercise">
+    <h3>New exercise</h3>
+    <label>Name <input name="name" required maxlength="60" placeholder="e.g. Bulgarian Split Squat"></label>
+    <label>Category <select name="category" class="select" id="new-ex-cat"></select></label>
+    <p class="error" id="ex-error"></p>
+    <div class="dlg-actions">
+      <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" value="ok">Add</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-set">
+  <form method="dialog" id="form-set">
+    <h3 id="set-title">Edit set</h3>
+    <div class="two">
+      <label>Weight (kg) <input name="weight" inputmode="decimal" required></label>
+      <label>Reps <input name="reps" inputmode="numeric" required></label>
+    </div>
+    <p class="error" id="set-error"></p>
+    <div class="dlg-actions">
+      <button class="btn danger ghost" value="delete" formnovalidate>Delete</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-goals">
+  <form method="dialog" id="form-goals">
+    <h3>Weekly goals</h3>
+    <div class="two">
+      <label>Workouts per week <input name="workouts" inputmode="numeric" required></label>
+      <label>Sets per category <input name="sets" inputmode="numeric" required></label>
+    </div>
+    <p class="muted small">Around 10–20 hard sets per muscle group a week is a common target for building muscle. Start at 10.</p>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-data">
+  <form method="dialog" id="form-data">
+    <h3>Backup &amp; export</h3>
+    <p class="muted small" id="data-summary"></p>
+    <p class="note">Your log is stored only on this phone. Export a backup now and then: uninstalling the app or clearing its data deletes everything.</p>
+    <button class="btn block primary" value="json">Export JSON <span class="btn-sub">full backup · best for AI agents</span></button>
+    <button class="btn block" value="csv">Export CSV <span class="btn-sub">one row per set · opens in Sheets/Excel</span></button>
+    <button class="btn block ghost" value="import" formnovalidate>Restore from JSON backup…</button>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
+    <p class="error" id="data-error"></p>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button class="btn ghost" value="cancel" formnovalidate>Close</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+</body>
+</html>

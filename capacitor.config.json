@@ -1,0 +1,9 @@
+{
+  "appId": "com.jivraj.gymlog",
+  "appName": "Gym Log",
+  "webDir": "www",
+  "backgroundColor": "#0f1113",
+  "android": {
+    "allowMixedContent": false
+  }
+}

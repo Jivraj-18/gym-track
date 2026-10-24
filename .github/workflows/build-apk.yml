@@ -1,0 +1,56 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to publish the APK as a GitHub Release
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Copy web app into the Android project
+        run: npx cap sync android
+
+      - name: Build signed release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/gym-log.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gym-log-apk
+          path: gym-log.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Gym Log build ${{ github.run_number }}
+          body: |
+            Install on Android: download **gym-log.apk** on your phone and open it
+            (allow "Install unknown apps" for your browser or Files app when asked).
+            Installing a newer build over an older one keeps your data.
+          files: gym-log.apk
+          make_latest: true
