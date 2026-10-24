@@ -7,7 +7,7 @@ android {
         applicationId "com.jivraj.gymlog"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -21,15 +21,15 @@ android {
     // Override with GYMLOG_KEYSTORE / GYMLOG_KEYSTORE_PASSWORD env vars to use your own key.
     signingConfigs {
         release {
-            storeFile file(System.getenv("GYMLOG_KEYSTORE") ?: "gymlog-release.jks")
-            storePassword System.getenv("GYMLOG_KEYSTORE_PASSWORD") ?: "gymlog-local"
-            keyAlias "gymlog"
-            keyPassword System.getenv("GYMLOG_KEYSTORE_PASSWORD") ?: "gymlog-local"
+            storeFile = file(System.getenv("GYMLOG_KEYSTORE") ?: "gymlog-release.jks")
+            storePassword = System.getenv("GYMLOG_KEYSTORE_PASSWORD") ?: "gymlog-local"
+            keyAlias = "gymlog"
+            keyPassword = System.getenv("GYMLOG_KEYSTORE_PASSWORD") ?: "gymlog-local"
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig = signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
