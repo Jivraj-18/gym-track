@@ -10,6 +10,7 @@
   <script src="vendor/chart.umd.min.js" defer></script>
   <script src="db.js" defer></script>
   <script src="app.js" defer></script>
+  <script src="body.js" defer></script>
 </head>
 <body>
 
@@ -60,14 +61,27 @@
               <button type="button" class="step" data-dir="1">+</button>
             </div>
           </div>
+          <div class="stepper" data-field="time" data-step="5" data-min="1" data-max="36000" hidden>
+            <span class="stepper-label">Time (m:ss)</span>
+            <div class="stepper-row">
+              <button type="button" class="step" data-dir="-1">−</button>
+              <input inputmode="text" id="in-time" value="0:30">
+              <button type="button" class="step" data-dir="1">+</button>
+            </div>
+          </div>
           <div class="stepper" data-field="weight" data-step="2.5" data-min="0" data-max="1000">
-            <span class="stepper-label">Weight (kg)</span>
+            <span class="stepper-label" id="weight-label">Weight (kg)</span>
             <div class="stepper-row">
               <button type="button" class="step" data-dir="-1">−</button>
               <input inputmode="decimal" id="in-weight" value="20">
               <button type="button" class="step" data-dir="1">+</button>
             </div>
           </div>
+        </div>
+        <div class="hold-timer" id="hold-timer" hidden>
+          <div class="ht-clock" id="ht-clock">0:00</div>
+          <div class="ht-sub muted small" id="ht-sub">Timer buzzes when you reach your target time</div>
+          <button type="button" class="btn block" id="ht-btn">▶ Start timer</button>
         </div>
         <button class="btn primary block big" id="add-sets">Add sets</button>
       </div>
@@ -114,7 +128,7 @@
         <div class="cats lift-filter" id="lift-filter"></div>
         <div id="lifts"></div>
         <p class="muted small footnote">Strength is your estimated 1-rep max from the best set of each session
-          (weight × (1 + reps ÷ 30)), so 80 kg × 8 and 90 kg × 5 compare fairly. Bodyweight moves track reps.</p>
+          (weight × (1 + reps ÷ 30)), so 80 kg × 8 and 90 kg × 5 compare fairly. Bodyweight moves track reps; timed holds track your longest hold.</p>
       </div>
 
       <!-- Am I showing up? -->
@@ -127,12 +141,71 @@
         <div class="heat-legend muted small">Fewer <i class="cell"></i><i class="cell l1"></i><i class="cell l2"></i><i class="cell l3"></i> More sets</div>
       </div>
     </section>
+
+    <!-- BODY -->
+    <section id="view-body" class="view" hidden>
+      <div class="view-head">
+        <h2 class="view-title">Body</h2>
+        <button class="link" id="sites-btn">Choose measurements</button>
+      </div>
+
+      <div class="card body-entry">
+        <div class="date-nav compact">
+          <button class="icon-btn" id="body-prev" aria-label="Previous day">‹</button>
+          <button class="date-label" id="body-day-label"></button>
+          <button class="icon-btn" id="body-next" aria-label="Next day">›</button>
+          <input type="date" id="body-picker" class="visually-hidden" tabindex="-1">
+        </div>
+        <form id="form-body" novalidate>
+          <div class="stepper wide" data-field="bw" data-step="0.1" data-min="20" data-max="400">
+            <span class="stepper-label">Body weight (kg)</span>
+            <div class="bw-row">
+              <button type="button" class="step" data-dir="-1">−</button>
+              <input inputmode="decimal" id="in-bw" name="weight" placeholder="—">
+              <button type="button" class="step" data-dir="1">+</button>
+            </div>
+          </div>
+          <div class="section-title meas-title">Measurements (cm) <span class="muted">optional</span></div>
+          <div class="meas-grid" id="meas-grid"></div>
+          <p class="error" id="body-error"></p>
+          <div class="body-actions">
+            <button type="button" class="btn ghost danger" id="body-delete" hidden>Delete</button>
+            <button type="submit" class="btn primary big" id="body-save">Save</button>
+          </div>
+        </form>
+        <p class="muted small footnote">Weigh in the morning after the bathroom, before eating. Measure relaxed, tape snug but not squeezing, same spot each time.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Weight trend</div>
+        <div id="bw-summary"></div>
+        <div class="range-row" id="bw-range">
+          <button class="chip active" data-range="30">1M</button>
+          <button class="chip" data-range="90">3M</button>
+          <button class="chip" data-range="365">1Y</button>
+          <button class="chip" data-range="0">All</button>
+        </div>
+        <div class="chart-box"><canvas id="chart-bw"></canvas></div>
+        <p class="muted small footnote">Day-to-day weight swings 1–2 kg with water and food. The bold line is your 7-day average, which is the number to watch.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Measurements</div>
+        <div id="meas-summary"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Log</div>
+        <div id="body-history"></div>
+      </div>
+    </section>
   </main>
 
   <nav class="tabbar">
     <button class="tab active" data-view="log"><span class="tab-ico">＋</span>Log</button>
     <button class="tab" data-view="history"><span class="tab-ico">☰</span>History</button>
     <button class="tab" data-view="stats"><span class="tab-ico">↗</span>Progress</button>
+    <button class="tab" data-view="body"><span class="tab-ico">◎</span>Body</button>
   </nav>
 </div>
 
@@ -142,6 +215,11 @@
     <h3>New exercise</h3>
     <label>Name <input name="name" required maxlength="60" placeholder="e.g. Bulgarian Split Squat"></label>
     <label>Category <select name="category" class="select" id="new-ex-cat"></select></label>
+    <div class="type-pick">
+      <span class="stepper-label left">Track by</span>
+      <label class="radio"><input type="radio" name="type" value="reps" checked><span><strong>Reps</strong> weight × reps (squat, curl)</span></label>
+      <label class="radio"><input type="radio" name="type" value="time"><span><strong>Time</strong> holds (plank, wall sit, dead hang)</span></label>
+    </div>
     <p class="error" id="ex-error"></p>
     <div class="dlg-actions">
       <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
@@ -154,12 +232,25 @@
   <form method="dialog" id="form-set">
     <h3 id="set-title">Edit set</h3>
     <div class="two">
-      <label>Weight (kg) <input name="weight" inputmode="decimal" required></label>
-      <label>Reps <input name="reps" inputmode="numeric" required></label>
+      <label>Weight (kg) <input name="weight" inputmode="decimal"></label>
+      <label id="set-reps-label">Reps <input name="reps" inputmode="numeric"></label>
+      <label id="set-dur-label" hidden>Time (m:ss) <input name="duration" inputmode="text"></label>
     </div>
     <p class="error" id="set-error"></p>
     <div class="dlg-actions">
       <button class="btn danger ghost" value="delete" formnovalidate>Delete</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-sites">
+  <form method="dialog" id="form-sites">
+    <h3>Measurements to track</h3>
+    <div class="site-list" id="site-list"></div>
+    <div class="dlg-actions">
       <span class="spacer"></span>
       <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
       <button class="btn primary" value="ok">Save</button>
@@ -188,8 +279,9 @@
     <h3>Backup &amp; export</h3>
     <p class="muted small" id="data-summary"></p>
     <p class="note">Your log is stored only on this phone. Export a backup now and then: uninstalling the app or clearing its data deletes everything.</p>
-    <button class="btn block primary" value="json">Export JSON <span class="btn-sub">full backup · best for AI agents</span></button>
-    <button class="btn block" value="csv">Export CSV <span class="btn-sub">one row per set · opens in Sheets/Excel</span></button>
+    <button class="btn block primary" value="json">Export JSON <span class="btn-sub">full backup incl. body · best for AI agents</span></button>
+    <button class="btn block" value="csv">Export workouts CSV <span class="btn-sub">one row per set · opens in Sheets/Excel</span></button>
+    <button class="btn block" value="bodycsv">Export body CSV <span class="btn-sub">one row per day · weight + measurements</span></button>
     <button class="btn block ghost" value="import" formnovalidate>Restore from JSON backup…</button>
     <input type="file" id="import-file" accept="application/json,.json" hidden>
     <p class="error" id="data-error"></p>

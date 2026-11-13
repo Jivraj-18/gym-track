@@ -87,7 +87,7 @@ main { max-width: 640px; margin: 0 auto; padding: 14px 16px calc(96px + var(--sa
 .card-title { font-weight: 700; margin-bottom: 10px; display: flex; gap: 8px; align-items: baseline; }
 
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: repeat(3, 1fr);
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--surface); border-top: 1px solid var(--line); padding-bottom: var(--safe-b);
 }
 .tab { border: 0; background: none; padding: 9px 0 11px; color: var(--muted); font-size: 0.78rem; font-weight: 600; display: grid; gap: 2px; justify-items: center; }
@@ -268,3 +268,57 @@ summary { cursor: pointer; color: var(--accent); font-weight: 600; margin-bottom
 .btn-sub { font-size: 0.78rem; font-weight: 500; opacity: 0.75; }
 .note { background: color-mix(in srgb, var(--warn) 12%, var(--surface-2)); border-radius: 10px; padding: 10px 12px; font-size: 0.85rem; margin: 0 0 14px; }
 .toast.pr { background: var(--accent); color: var(--accent-ink); }
+
+/* ---------- timed exercises ---------- */
+.stepper input#in-time { font-size: 1.35rem; }
+.hold-timer { background: var(--surface-2); border-radius: 12px; padding: 12px; margin-bottom: 12px; text-align: center; }
+.ht-clock { font-size: 2.6rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.1; }
+.ht-clock.ready { color: var(--warn); }
+.ht-clock.hit { color: var(--good); }
+.ht-sub { margin: 2px 0 10px; }
+.hold-timer.running { box-shadow: inset 0 0 0 2px var(--accent); }
+.hold-timer.running #ht-btn { background: var(--text); color: var(--bg); border-color: var(--text); }
+.type-pick { margin-bottom: 8px; }
+.stepper-label.left { text-align: left; }
+.radio, .check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 12px; margin-bottom: 8px; color: var(--text); font-size: 0.9rem; cursor: pointer; }
+.radio input, .check input { width: auto; margin: 2px 0 0; accent-color: var(--accent); }
+.radio strong { display: block; }
+.radio span { color: var(--muted); }
+.radio:has(input:checked) { border-color: var(--accent); }
+
+/* ---------- body ---------- */
+.date-nav.compact { margin-bottom: 12px; }
+.stepper.wide { margin-bottom: 14px; }
+.bw-row { display: grid; grid-template-columns: 56px 1fr 56px; gap: 8px; }
+.bw-row input { margin: 0; text-align: center; font-size: 1.8rem; font-weight: 800; padding: 6px; font-variant-numeric: tabular-nums; }
+.bw-row .step { height: auto; }
+.meas-title { display: block; margin-bottom: 8px; }
+.meas-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.meas { margin-bottom: 10px; font-size: 0.8rem; }
+.meas input { margin-top: 4px; padding: 10px 12px; font-variant-numeric: tabular-nums; }
+.body-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.body-actions .btn.primary { flex: 1; }
+.kpis.tight { margin-bottom: 8px; }
+.kpis.tight .kpi { background: var(--surface-2); border: 0; }
+.kpis.tight .kpi-val { font-size: 1.35rem; }
+.insight { margin: 4px 0 12px; font-size: 0.92rem; }
+.range-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.range-row .chip { padding: 5px 12px; font-size: 0.82rem; }
+.chart-box.short { height: 170px; margin: 4px 0 8px; }
+.meas-head, .meas-row { display: grid; grid-template-columns: 1.6fr 1fr 0.9fr 0.9fr; gap: 6px; align-items: center; }
+.meas-head { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.meas-head span:not(:first-child), .meas-row > span:not(:first-child) { text-align: right; }
+.meas-row { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 10px 0; text-align: left; font-variant-numeric: tabular-nums; }
+.meas-name { display: flex; flex-direction: column; font-weight: 650; }
+.meas-v { font-weight: 750; }
+.meas-v small { color: var(--muted); font-weight: 500; }
+.chg { font-weight: 650; }
+.chg.pos, .chg.neg { color: var(--text); }
+.meas-detail { padding: 6px 0 10px; border-bottom: 1px solid var(--line); }
+.body-row { display: flex; justify-content: space-between; width: 100%; background: none; border: 0; border-top: 1px solid var(--line);
+  padding: 11px 0; text-align: left; font-variant-numeric: tabular-nums; }
+.body-row:first-child { border-top: 0; }
+.body-row.current { color: var(--accent); }
+.site-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; max-height: 55vh; overflow: auto; }
+.site-list .check { padding: 9px 10px; }

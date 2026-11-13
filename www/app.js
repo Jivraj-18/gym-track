@@ -16,6 +16,21 @@ const fmtKg = (v) => num(v, 2);
 const fmtVolume = (v) => (v >= 10000 ? `${num(v / 1000, 1)} t` : `${num(v, 0)} kg`);
 const shortDate = (d) => parseYmd(d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 const setText = (w, r) => (w > 0 ? `${fmtKg(w)} kg × ${r}` : `${r} reps`);
+// Durations: 75 → "1:15", 3725 → "1:02:05"
+const fmtDur = (sec) => {
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+};
+// Accepts "90", "1:30", "1:02:05", "1.30" → seconds (NaN if unreadable)
+const parseDur = (str) => {
+  const parts = String(str ?? "").trim().replace(/[.,]/g, ":").split(":").filter((p) => p !== "");
+  if (!parts.length || parts.length > 3 || parts.some((p) => !/^\d+$/.test(p))) return NaN;
+  return parts.map(Number).reduce((a, n) => a * 60 + n, 0);
+};
+const timeText = (w, d) => `${fmtDur(d)}${w > 0 ? ` @ ${fmtKg(w)} kg` : ""}`;
+// Label for any set-like object {weight, reps, duration}
+const setLabel = (s) => (s.duration != null && s.reps == null ? timeText(s.weight, s.duration) : setText(s.weight, s.reps));
 const agoText = (d) => {
   const n = daysBetween(d, todayStr());
   return n <= 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`;
@@ -83,6 +98,7 @@ function showView(name) {
   if (name === "history") loadHistory(true);
   if (name === "stats") loadProgress();
   if (name === "log") loadDay();
+  if (name === "body") Body.load();
 }
 
 // =====================================================================
@@ -112,9 +128,15 @@ function renderExercises() {
 function selectExercise(id, { scroll = true } = {}) {
   const ex = state.exercises.find((x) => x.id === id);
   if (!ex) return;
+  if (state.selectedEx?.id !== id) stopHoldTimer();
   state.selectedEx = ex;
   renderExercises();
   $("#entry-name").textContent = ex.name;
+  const timed = ex.type === "time";
+  $('[data-field="reps"]').hidden = timed;
+  $('[data-field="time"]').hidden = !timed;
+  $("#hold-timer").hidden = !timed;
+  $("#weight-label").textContent = timed ? "Added kg" : "Weight (kg)";
 
   const todays = state.daySets.filter((s) => s.exercise_id === id);
   const last = DB.lastSession(id, state.date);
@@ -124,19 +146,26 @@ function selectExercise(id, { scroll = true } = {}) {
     // Mid-workout: continue from the last set you did, one set at a time.
     const l = todays[todays.length - 1];
     setStepper("sets", 1);
-    setStepper("reps", l.reps);
+    if (timed) setStepper("time", l.duration); else setStepper("reps", l.reps);
     setStepper("weight", l.weight);
     parts.push(`${todays.length} set${todays.length > 1 ? "s" : ""} done`);
   } else if (last.date) {
     // Start of this exercise: copy last session's top set.
-    const top = last.sets.reduce((a, b) => (b.weight > a.weight ? b : a), last.sets[0]);
+    const top = timed
+      ? last.sets.reduce((a, b) => (b.duration > a.duration ? b : a), last.sets[0])
+      : last.sets.reduce((a, b) => (b.weight > a.weight ? b : a), last.sets[0]);
     setStepper("sets", last.sets.length);
-    setStepper("reps", top.reps);
+    if (timed) setStepper("time", top.duration); else setStepper("reps", top.reps);
     setStepper("weight", top.weight);
+  } else if (timed) {
+    setStepper("sets", 3);
+    setStepper("time", 30);
+    setStepper("weight", 0);
   }
   if (last.date) parts.push(`Last (${prettyDate(last.date)}): ${summarizeSets(last.sets)}`);
-  if (last.best) parts.push(`Best: ${setText(last.best.weight, last.best.reps)}`);
-  if (!last.date && !todays.length) parts.push("First time: pick a starting weight");
+  if (last.best) parts.push(`Best: ${setLabel(last.best)}`);
+  if (!last.date && !todays.length) parts.push(timed ? "First time: set a target time" : "First time: pick a starting weight");
+  updateTimerSub();
   $("#entry-last").textContent = parts.join(" · ");
   if (scroll) $("#entry").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -144,18 +173,25 @@ function selectExercise(id, { scroll = true } = {}) {
 // "3×8 @ 60 kg" when all sets match, else "60×8, 60×8, 62.5×6"
 function summarizeSets(sets) {
   if (!sets.length) return "";
+  if (sets[0].duration != null && sets[0].reps == null) {
+    const same = sets.every((s) => s.weight === sets[0].weight && s.duration === sets[0].duration);
+    if (same) return `${sets.length}×${timeText(sets[0].weight, sets[0].duration)}`;
+    return sets.map((s) => timeText(s.weight, s.duration)).join(", ");
+  }
   const same = sets.every((s) => s.weight === sets[0].weight && s.reps === sets[0].reps);
   if (same) return sets[0].weight > 0 ? `${sets.length}×${sets[0].reps} @ ${fmtKg(sets[0].weight)} kg` : `${sets.length}×${sets[0].reps}`;
   return sets.map((s) => (s.weight > 0 ? `${fmtKg(s.weight)}×${s.reps}` : `${s.reps}`)).join(", ");
 }
 
 function setStepper(field, value) {
-  $(`#in-${field}`).value = field === "weight" ? String(Math.round(value * 100) / 100) : String(value);
+  $(`#in-${field}`).value = field === "weight" ? String(Math.round(value * 100) / 100)
+    : field === "time" ? fmtDur(value) : String(value);
 }
 
 function stepperValue(field) {
   const el = $(`[data-field=${field}]`);
-  const v = parseFloat($(`#in-${field}`).value.replace(",", "."));
+  const raw = $(`#in-${field}`).value;
+  const v = field === "time" ? parseDur(raw) : parseFloat(raw.replace(",", "."));
   const min = Number(el.dataset.min), max = Number(el.dataset.max);
   return Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
 }
@@ -163,29 +199,38 @@ function stepperValue(field) {
 function onStep(btn) {
   const wrap = btn.closest(".stepper");
   const field = wrap.dataset.field;
-  let v = stepperValue(field) + Number(wrap.dataset.step) * Number(btn.dataset.dir);
+  // Time steps 5 s up to a minute, then 15 s
+  const step = field === "time" && stepperValue("time") + (btn.dataset.dir === "1" ? 0 : -1) >= 60 ? 15 : Number(wrap.dataset.step);
+  let v = stepperValue(field) + step * Number(btn.dataset.dir);
   if (field === "weight") v = Math.round(v / 0.25) * 0.25;
+  if (field === "time") v = Math.round(v / 5) * 5 || 5;
   setStepper(field, Math.min(Number(wrap.dataset.max), Math.max(Number(wrap.dataset.min), v)));
 }
 
 async function addSets() {
   if (!state.selectedEx) return;
+  const timed = state.selectedEx.type === "time";
   const count = Math.round(stepperValue("sets"));
   const reps = Math.round(stepperValue("reps"));
+  const duration = Math.round(stepperValue("time"));
   const weight = stepperValue("weight");
+  if (timed && !Number.isFinite(parseDur($("#in-time").value))) return toastErr(new Error("Enter time as m:ss, e.g. 1:30"));
   const btn = $("#add-sets");
   btn.disabled = true;
   try {
     const { pr } = await DB.addSets({
       exercise_id: state.selectedEx.id, date: state.date,
-      sets: Array.from({ length: count }, () => ({ weight, reps })),
+      sets: Array.from({ length: count }, () => (timed ? { weight, duration } : { weight, reps })),
     });
-    if (pr) {
+    if (pr && pr.timed) {
+      toast(`🏆 New PR! ${timeText(pr.weight, pr.duration)} · +${fmtDur(pr.duration - pr.previous_duration)} longer`, "pr", 4000);
+      navigator.vibrate?.([40, 60, 40]);
+    } else if (pr) {
       const gain = pr.bodyweight ? `+${pr.reps - pr.previous_reps} reps` : `est. 1RM ${num(pr.e1rm, 1)} kg (+${num(pr.e1rm - pr.previous_e1rm, 1)})`;
       toast(`🏆 New PR! ${setText(pr.weight, pr.reps)} · ${gain}`, "pr", 4000);
       navigator.vibrate?.([40, 60, 40]);
     } else {
-      toast(`Added ${count} × ${reps}${weight > 0 ? ` @ ${fmtKg(weight)} kg` : ""}`);
+      toast(timed ? `Added ${count} × ${timeText(weight, duration)}` : `Added ${count} × ${reps}${weight > 0 ? ` @ ${fmtKg(weight)} kg` : ""}`);
       navigator.vibrate?.(30);
     }
     loadDay();
@@ -222,15 +267,16 @@ function renderDay() {
     return;
   }
   $("#day-log").innerHTML = [...groups.values()].map((g) => {
-    const vol = g.sets.reduce((a, s) => a + s.weight * s.reps, 0);
+    const vol = g.sets.reduce((a, s) => a + s.weight * (s.reps || 0), 0);
+    const held = g.sets.reduce((a, s) => a + (s.duration || 0), 0);
     return `<div class="ex-block">
       <div class="ex-block-head" style="--cat:${catVar(g.category)}">
         <strong>${esc(g.name)}</strong>
-        <span class="muted small">${g.sets.length} sets${vol ? ` · ${fmtVolume(vol)}` : ""}</span>
+        <span class="muted small">${g.sets.length} sets${vol ? ` · ${fmtVolume(vol)}` : held ? ` · ${fmtDur(held)} total` : ""}</span>
       </div>${g.sets.map((s) => `
       <button class="set-row" data-set="${s.id}">
         <span class="set-no">Set ${s.set_number}</span>
-        <span class="set-val">${setText(s.weight, s.reps)}</span>
+        <span class="set-val">${setLabel(s)}</span>
         <span class="set-edit">edit</span>
       </button>`).join("")}
     </div>`;
@@ -260,7 +306,7 @@ async function onExerciseSubmit(e) {
   if (e.submitter?.value === "cancel") return $("#dlg-exercise").close();
   const f = e.target;
   try {
-    const ex = await DB.createExercise({ name: f.name.value, category: f.category.value });
+    const ex = await DB.createExercise({ name: f.name.value, category: f.category.value, type: f.type.value });
     $("#dlg-exercise").close();
     state.cat = ex.category;
     store.set("gl_cat", state.cat);
@@ -293,8 +339,12 @@ function openSet(id) {
   if (!editingSet) return;
   const f = $("#form-set");
   $("#set-title").textContent = `${editingSet.exercise} · set ${editingSet.set_number}`;
+  const timed = editingSet.type === "time";
+  $("#set-reps-label").hidden = timed;
+  $("#set-dur-label").hidden = !timed;
   f.weight.value = editingSet.weight;
-  f.reps.value = editingSet.reps;
+  f.reps.value = editingSet.reps ?? "";
+  f.duration.value = timed ? fmtDur(editingSet.duration) : "";
   $("#set-error").textContent = "";
   $("#dlg-set").showModal();
 }
@@ -309,7 +359,14 @@ async function onSetSubmit(e) {
       await DB.deleteSet(editingSet.id);
       toast("Set deleted");
     } else {
-      await DB.updateSet(editingSet.id, { weight: parseFloat(f.weight.value.replace(",", ".")), reps: parseInt(f.reps.value, 10) });
+      const weight = f.weight.value.trim() === "" ? 0 : Number(f.weight.value.replace(",", "."));
+      if (editingSet.type === "time") {
+        const duration = parseDur(f.duration.value);
+        if (!Number.isFinite(duration)) throw new Error("Enter time as m:ss, e.g. 1:30");
+        await DB.updateSet(editingSet.id, { weight, duration });
+      } else {
+        await DB.updateSet(editingSet.id, { weight, reps: Number(f.reps.value) });
+      }
       toast("Set updated");
     }
     $("#dlg-set").close();
@@ -317,6 +374,69 @@ async function onSetSubmit(e) {
     if (state.selectedEx) selectExercise(state.selectedEx.id, { scroll: false });
   } catch (err) {
     $("#set-error").textContent = err.message;
+  }
+}
+
+// ---------- hold timer (timed exercises) ----------
+// 3-second get-ready countdown, then counts up; buzzes once at the target time.
+// Stopping fills the elapsed time into the Time field.
+const COUNTDOWN = 3;
+let hold = null; // {start, target, buzzed, iv, lock}
+
+function updateTimerSub() {
+  if (hold) return;
+  const t = stepperValue("time");
+  $("#ht-sub").textContent = `${COUNTDOWN}s to get in position, then it buzzes at ${fmtDur(t)}`;
+}
+
+async function startHoldTimer() {
+  const target = Math.round(stepperValue("time"));
+  hold = { start: Date.now() + COUNTDOWN * 1000, target, buzzed: false, lastCount: null };
+  hold.iv = setInterval(tickHold, 100);
+  try { hold.lock = await navigator.wakeLock?.request("screen"); } catch {}
+  $("#hold-timer").classList.add("running");
+  $("#ht-btn").textContent = "■ Stop & use this time";
+  tickHold();
+}
+
+function tickHold() {
+  if (!hold) return;
+  const ms = Date.now() - hold.start;
+  const clock = $("#ht-clock");
+  if (ms < 0) {
+    const n = Math.ceil(-ms / 1000);
+    clock.textContent = String(n);
+    clock.className = "ht-clock ready";
+    $("#ht-sub").textContent = "Get in position…";
+    if (hold.lastCount !== n) { hold.lastCount = n; navigator.vibrate?.(40); }
+    return;
+  }
+  if (hold.lastCount !== 0) { hold.lastCount = 0; navigator.vibrate?.(150); }
+  const sec = Math.floor(ms / 1000);
+  clock.textContent = fmtDur(sec);
+  const hit = sec >= hold.target;
+  clock.className = `ht-clock${hit ? " hit" : ""}`;
+  $("#ht-sub").textContent = hit ? `Target ${fmtDur(hold.target)} reached. Keep going or stop.` : `Target ${fmtDur(hold.target)}`;
+  if (hit && !hold.buzzed) { hold.buzzed = true; navigator.vibrate?.([300, 120, 300]); }
+}
+
+function stopHoldTimer(use = false) {
+  if (!hold) return;
+  clearInterval(hold.iv);
+  try { hold.lock?.release(); } catch {}
+  const sec = Math.floor((Date.now() - hold.start) / 1000);
+  hold = null;
+  $("#hold-timer").classList.remove("running");
+  $("#ht-btn").textContent = "▶ Start timer";
+  $("#ht-clock").className = "ht-clock";
+  if (use && sec >= 1) {
+    setStepper("time", sec);
+    setStepper("sets", 1);
+    $("#ht-clock").textContent = fmtDur(sec);
+    $("#ht-sub").textContent = "Filled in. Tap Add sets to save it.";
+  } else {
+    $("#ht-clock").textContent = "0:00";
+    updateTimerSub();
   }
 }
 
@@ -347,7 +467,8 @@ function loadHistory(reset) {
 // =====================================================================
 
 // Turn per-session best sets into per-lift progress: PRs, trend, and a status.
-// Strength metric = estimated 1RM of the session's best set; bodyweight lifts use max reps.
+// Strength metric = estimated 1RM of the session's best set; bodyweight lifts use max reps;
+// timed holds use the longest hold.
 function analyze(sessions) {
   const t = todayStr();
   const byLift = new Map();
@@ -359,11 +480,12 @@ function analyze(sessions) {
   const prs = [];
   for (const lift of byLift.values()) {
     const ss = lift.sessions;
-    lift.bodyweight = ss.every((s) => !s.top_weight);
+    lift.timed = ss[0].type === "time";
+    lift.bodyweight = !lift.timed && ss.every((s) => !s.top_weight);
     let best = -Infinity;
     let lastPr = 0;
     ss.forEach((s, i) => {
-      s.value = lift.bodyweight ? s.max_reps : e1rm(s.best_weight, s.best_reps);
+      s.value = lift.timed ? s.max_duration : lift.bodyweight ? s.max_reps : e1rm(s.best_weight, s.best_reps);
       if (s.value > best + 1e-9) {
         if (i > 0) { s.pr = true; prs.push({ lift, s, gain: s.value - best }); }
         best = s.value;
@@ -406,8 +528,12 @@ function statusTip(l) {
   const n = l.sinceLastPr;
   switch (l.status) {
     case "up": return n === 0 ? "New best last session. Keep the same plan." : "PR within the last 2 sessions. On track.";
-    case "hold": return `No PR in ${n} sessions. Normal. Aim for one more rep on your top set next time.`;
-    case "stalled": return `${n} sessions without a PR. Try adding 1–2 reps per set before adding weight, or drop ~10% and build back up.`;
+    case "hold": return l.timed
+      ? `No PR in ${n} sessions. Normal. Try holding 5–10 seconds longer on your first set next time.`
+      : `No PR in ${n} sessions. Normal. Aim for one more rep on your top set next time.`;
+    case "stalled": return l.timed
+      ? `${n} sessions without a longer hold. Try a harder variation (feet closer, arms extended, added weight) for shorter holds.`
+      : `${n} sessions without a PR. Try adding 1–2 reps per set before adding weight, or drop ~10% and build back up.`;
     case "down": return `Latest session is ${num((1 - l.latest.value / l.best.value) * 100, 0)}% below your best. Check sleep, food and recovery, or take a lighter week.`;
     default: return `Log ${3 - l.sessions.length} more session${3 - l.sessions.length > 1 ? "s" : ""} to see a trend.`;
   }
@@ -513,8 +639,8 @@ function renderPrFeed() {
     <div class="pr-row" style="--cat:${catVar(lift.category)}">
       <span class="pr-ico">🏆</span>
       <div class="pr-main"><strong>${esc(lift.name)}</strong>
-        <span class="muted small">${setText(s.best_weight, s.best_reps)}</span></div>
-      <div class="pr-side"><span class="pr-gain">${lift.bodyweight ? `+${gain} reps` : `+${num(gain, 1)} kg`}</span>
+        <span class="muted small">${sessLabel(s)}</span></div>
+      <div class="pr-side"><span class="pr-gain">${lift.timed ? `+${fmtDur(gain)}` : lift.bodyweight ? `+${gain} reps` : `+${num(gain, 1)} kg`}</span>
         <span class="muted small">${prettyDate(s.date)}</span></div>
     </div>`).join("");
 }
@@ -556,7 +682,7 @@ function renderLifts() {
       <button class="lift-main" data-lift="${l.id}" aria-expanded="${open}">
         <div class="lift-l">
           <div class="lift-name"><span class="dot"></span>${esc(l.name)}</div>
-          <div class="lift-sub">Last ${setText(l.latest.best_weight, l.latest.best_reps)} · ${agoText(l.latest.date)}</div>
+          <div class="lift-sub">Last ${sessLabel(l.latest)} · ${agoText(l.latest.date)}</div>
         </div>
         ${sparkline(l)}
         <div class="lift-r"><span class="badge ${st.cls}">${st.label}</span>${trend}</div>
@@ -567,19 +693,22 @@ function renderLifts() {
   if (state.openLift) drawLiftChart(lifts.find((l) => l.id === state.openLift));
 }
 
+// Best set of a progress session row
+const sessLabel = (s) => (s.type === "time" ? timeText(s.best_weight, s.best_duration) : setText(s.best_weight, s.best_reps));
+
 function liftDetail(l) {
   const b = l.best;
   const recent = l.sessions.slice(-5).reverse();
   return `<div class="lift-detail">
     <div class="lift-stats">
-      <div><span class="muted small">Best set</span><strong>${setText(b.best_weight, b.best_reps)}</strong><span class="muted small">${shortDate(b.date)}</span></div>
-      <div><span class="muted small">${l.bodyweight ? "Max reps" : "Est. 1RM"}</span><strong>${l.bodyweight ? b.value : `${num(b.value, 1)} kg`}</strong></div>
+      <div><span class="muted small">Best set</span><strong>${sessLabel(b)}</strong><span class="muted small">${shortDate(b.date)}</span></div>
+      <div><span class="muted small">${l.timed ? "Longest hold" : l.bodyweight ? "Max reps" : "Est. 1RM"}</span><strong>${l.timed ? fmtDur(b.value) : l.bodyweight ? b.value : `${num(b.value, 1)} kg`}</strong></div>
       <div><span class="muted small">Sessions</span><strong>${l.sessions.length}</strong></div>
     </div>
     <p class="tip">${esc(statusTip(l))}</p>
     ${l.sessions.length > 1 ? `<div class="chart-box"><canvas id="chart-lift"></canvas></div>` : ""}
     <div class="recent">${recent.map((s) => `
-      <div class="recent-row"><span>${prettyDate(s.date)}</span><span>${s.sets} sets · best ${setText(s.best_weight, s.best_reps)}${s.pr ? " 🏆" : ""}</span></div>`).join("")}
+      <div class="recent-row"><span>${prettyDate(s.date)}</span><span>${s.sets} sets · best ${sessLabel(s)}${s.pr ? " 🏆" : ""}</span></div>`).join("")}
     </div>
   </div>`;
 }
@@ -593,7 +722,10 @@ function drawLiftChart(l) {
     type: "line",
     data: {
       labels: ss.map((s) => shortDate(s.date)),
-      datasets: l.bodyweight
+      datasets: l.timed
+        ? [{ label: "Longest hold", data: ss.map((s) => s.max_duration), borderColor: color, backgroundColor: color, tension: 0.25,
+          pointRadius: ss.map((s) => (s.pr ? 4 : 2)) }]
+        : l.bodyweight
         ? [{ label: "Max reps", data: ss.map((s) => s.max_reps), borderColor: color, backgroundColor: color, tension: 0.25,
           pointRadius: ss.map((s) => (s.pr ? 4 : 2)) }]
         : [
@@ -605,8 +737,9 @@ function drawLiftChart(l) {
     },
     options: {
       plugins: { legend: { labels: { boxWidth: 10, boxHeight: 2 } },
-        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw}${l.bodyweight ? "" : " kg"}` } } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 6, maxRotation: 0 } } },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${l.timed ? fmtDur(c.raw) : c.raw}${l.bodyweight || l.timed ? "" : " kg"}` } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 6, maxRotation: 0 } },
+        ...(l.timed ? { y: { ticks: { callback: (v) => fmtDur(v) } } } : {}) },
     },
   });
 }
@@ -689,9 +822,10 @@ async function saveFile(filename, text, mime) {
 function openData() {
   const w = DB.listWorkouts({ limit: 100000 });
   const nSets = w.reduce((a, x) => a + x.sets, 0);
-  $("#data-summary").textContent = w.length
+  const nBody = DB.listBody().length;
+  $("#data-summary").textContent = (w.length
     ? `${w.length} workouts · ${nSets} sets · since ${shortDate(w[w.length - 1].date)} ${parseYmd(w[w.length - 1].date).getFullYear()}`
-    : "No workouts logged yet.";
+    : "No workouts logged yet.") + (nBody ? ` · ${nBody} body entries` : "");
   $("#data-error").textContent = "";
   $("#dlg-data").showModal();
 }
@@ -709,6 +843,8 @@ async function onDataSubmit(e) {
     } else if (action === "csv") {
       await saveFile(`gym-log-${stamp}.csv`, DB.exportCSV(), "text/csv");
       store.set("gl_last_export", stamp);
+    } else if (action === "bodycsv") {
+      await saveFile(`gym-log-body-${stamp}.csv`, DB.exportBodyCSV(), "text/csv");
     } else if (action === "import") {
       $("#import-file").value = "";
       $("#import-file").click();
@@ -725,13 +861,15 @@ async function onImportFile(e) {
     let data;
     try { data = JSON.parse(await file.text()); } catch { throw new Error("That file isn't valid JSON"); }
     const n = Array.isArray(data?.sets) ? data.sets.length : 0;
-    if (!confirm(`Replace everything on this phone with this backup (${n} sets)?\n\nYour current log will be overwritten.`)) return;
+    const nb = Array.isArray(data?.body) ? `, ${data.body.length} body entries` : "";
+    if (!confirm(`Replace everything on this phone with this backup (${n} sets${nb})?\n\nYour current log will be overwritten.`)) return;
     const res = await DB.importJSON(data);
     $("#dlg-data").close();
     state.selectedEx = null;
     loadExercises();
     loadDay();
-    toast(`Restored ${res.sets} sets, ${res.exercises} exercises`);
+    toast(`Restored ${res.sets} sets, ${res.exercises} exercises${res.body ? `, ${res.body} body entries` : ""}`);
+    if (!$("#view-body").hidden) Body.load();
   } catch (err) {
     $("#data-error").textContent = err.message;
   }
@@ -776,8 +914,14 @@ function wire() {
   });
   $("#edit-ex-toggle").addEventListener("click", () => { state.editMode = !state.editMode; renderExercises(); });
 
-  $$(".step").forEach((b) => b.addEventListener("click", () => onStep(b)));
-  $$(".stepper input").forEach((i) => i.addEventListener("focus", () => i.select()));
+  $$("#entry .step").forEach((b) => b.addEventListener("click", () => { onStep(b); updateTimerSub(); }));
+  $$("#entry .stepper input").forEach((i) => i.addEventListener("focus", () => i.select()));
+  $("#in-time").addEventListener("change", () => {
+    const v = parseDur($("#in-time").value);
+    if (Number.isFinite(v) && v > 0) setStepper("time", v);
+    updateTimerSub();
+  });
+  $("#ht-btn").addEventListener("click", () => (hold ? stopHoldTimer(true) : startHoldTimer()));
   $("#add-sets").addEventListener("click", addSets);
   $("#day-log").addEventListener("click", (e) => {
     const r = e.target.closest("[data-set]");
