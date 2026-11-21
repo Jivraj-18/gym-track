@@ -35,21 +35,37 @@ const BODY_SITES = [
 ];
 const SITE_KEYS = new Set(BODY_SITES.map((s) => s.key));
 
+// Cardio activities. `extra` is the one optional machine setting that makes sense for it:
+// treadmill incline (%), or a resistance/level number on bikes, rowers, ellipticals and steppers.
+const CARDIO_ACTIVITIES = [
+  { name: "Treadmill", extra: "incline" },
+  { name: "Cycle", extra: "level" },
+  { name: "Outdoor run", extra: null },
+  { name: "Walk", extra: null },
+  { name: "Rowing", extra: "level" },
+  { name: "Elliptical", extra: "level" },
+  { name: "Stair climber", extra: "level" },
+  { name: "Other", extra: null },
+];
+
 const EXPORT_FORMAT = "gym-log-export";
-const EXPORT_VERSION = 2;
+const EXPORT_VERSION = 3;
 
 const e1rm = (weight, reps) => weight * (1 + reps / 30); // Epley estimate
+// Average speed in km/h of a cardio session (null without a distance)
+const speedKmh = (c) => (c.distance ? c.distance / (c.duration / 3600) : null);
 
 const DB = (() => {
   let idb;
   let exercises = []; // {id, name, category, type, created_at}
   let sets = [];      // {id, exercise_id, workout_date, set_number, weight, reps|null, duration|null, created_at}
   let body = [];      // {date, weight|null, measurements: {site: cm}, updated_at}
+  let cardio = [];    // {id, date, activity, duration (s), distance (km)|null, incline (%)|null, level|null, avg_hr|null, max_hr|null, calories|null, created_at}
 
   // ---------- IndexedDB plumbing ----------
   function open() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open("gymlog", 2);
+      const req = indexedDB.open("gymlog", 3);
       req.onupgradeneeded = (e) => {
         const d = req.result;
         if (e.oldVersion < 1) {
@@ -58,6 +74,7 @@ const DB = (() => {
           d.createObjectStore("meta", { keyPath: "key" });
         }
         if (e.oldVersion < 2) d.createObjectStore("body", { keyPath: "date" }); // one entry per day
+        if (e.oldVersion < 3) d.createObjectStore("cardio", { keyPath: "id", autoIncrement: true }); // one entry per cardio session
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -89,7 +106,7 @@ const DB = (() => {
 
   async function init() {
     idb = await open();
-    [exercises, sets, body] = await Promise.all([getAll("exercises"), getAll("sets"), getAll("body")]);
+    [exercises, sets, body, cardio] = await Promise.all([getAll("exercises"), getAll("sets"), getAll("body"), getAll("cardio")]);
     const [seeded, v2] = await Promise.all([getMeta("seeded"), getMeta("v2")]);
     const now = new Date().toISOString();
 
@@ -303,18 +320,25 @@ const DB = (() => {
   // ---------- history & progress ----------
   function listWorkouts({ limit = 20, before } = {}) {
     const days = new Map();
+    const dayOf = (date) => {
+      if (!days.has(date)) days.set(date, { date, sets: 0, ex: new Set(), volume: 0, cats: new Set(), cardio: [] });
+      return days.get(date);
+    };
     for (const s of sets) {
       if (before && s.workout_date >= before) continue;
-      const d = days.get(s.workout_date) || { date: s.workout_date, sets: 0, ex: new Set(), volume: 0, cats: new Set() };
+      const d = dayOf(s.workout_date);
       d.sets++;
       d.volume += s.weight * (s.reps || 0);
       d.ex.add(s.exercise_id);
       const e = exercises.find((x) => x.id === s.exercise_id);
       if (e) d.cats.add(e.category);
-      days.set(s.workout_date, d);
+    }
+    for (const c of cardio) {
+      if (before && c.date >= before) continue;
+      dayOf(c.date).cardio.push({ activity: c.activity, duration: c.duration, distance: c.distance });
     }
     return [...days.values()].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit)
-      .map((d) => ({ date: d.date, sets: d.sets, exercises: d.ex.size, volume: d.volume, categories: [...d.cats] }));
+      .map((d) => ({ date: d.date, sets: d.sets, exercises: d.ex.size, volume: d.volume, categories: [...d.cats], cardio: d.cardio }));
   }
 
   // One row per (exercise, day): best set of that session + session totals.
@@ -380,6 +404,87 @@ const DB = (() => {
     body = body.filter((b) => b.date !== date);
   }
 
+  // ---------- cardio ----------
+  const optNum = (label, v, min, max, { int = false, dp = 2 } = {}) => {
+    if (v === "" || v == null) return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < min || n > max || (int && !Number.isInteger(n))) {
+      fail(`${label} must be ${int ? "a whole number " : ""}between ${min} and ${max}`);
+    }
+    return Math.round(n * 10 ** dp) / 10 ** dp;
+  };
+
+  function cleanCardio(c) {
+    const act = CARDIO_ACTIVITIES.find((a) => a.name === c.activity) || fail(`Activity must be one of: ${CARDIO_ACTIVITIES.map((a) => a.name).join(", ")}`);
+    const duration = Number(c.duration);
+    if (!Number.isInteger(duration) || duration < 1 || duration > 43200) fail("Time must be between 1 second and 12 hours");
+    const out = {
+      date: checkDate(c.date),
+      activity: act.name,
+      duration,
+      distance: optNum("Distance", c.distance, 0.01, 1000),
+      incline: act.extra === "incline" ? optNum("Incline", c.incline, 0, 40, { dp: 1 }) : null,
+      level: act.extra === "level" ? optNum("Level", c.level, 0, 100, { dp: 1 }) : null,
+      avg_hr: optNum("Average heart rate", c.avg_hr, 30, 250, { int: true, dp: 0 }),
+      max_hr: optNum("Max heart rate", c.max_hr, 30, 250, { int: true, dp: 0 }),
+      calories: optNum("Calories", c.calories, 1, 20000, { int: true, dp: 0 }),
+    };
+    if (out.avg_hr && out.max_hr && out.max_hr < out.avg_hr) fail("Max heart rate can't be lower than the average");
+    const sp = speedKmh(out);
+    if (sp > 80) fail(`That works out to ${Math.round(sp)} km/h. Check the time and distance`);
+    return out;
+  }
+
+  const byCardioOrder = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || a.id - b.id;
+  const listCardio = () => [...cardio].sort(byCardioOrder);
+  const listCardioOn = (date) => cardio.filter((c) => c.date === checkDate(date)).sort((a, b) => a.id - b.id);
+  const getCardio = (id) => cardio.find((c) => c.id === id) || null;
+  const cardioDates = () => new Set(cardio.map((c) => c.date));
+
+  // Personal bests among earlier sessions of one activity. Fastest speed only counts sessions of 10+ minutes.
+  function cardioBests(rows) {
+    const best = { distance: null, speed: null, duration: null };
+    for (const c of rows) {
+      if (c.distance != null && (best.distance == null || c.distance > best.distance)) best.distance = c.distance;
+      const sp = speedKmh(c);
+      if (sp != null && c.duration >= 600 && (best.speed == null || sp > best.speed)) best.speed = sp;
+      if (best.duration == null || c.duration > best.duration) best.duration = c.duration;
+    }
+    return best;
+  }
+
+  // Add (no id) or replace (id) a session. Returns {entry, prs}; prs only for new sessions that beat earlier ones.
+  async function saveCardio(input) {
+    const clean = cleanCardio(input);
+    const now = new Date().toISOString();
+    if (input.id != null) {
+      const old = cardio.find((c) => c.id === input.id) || fail("Session not found");
+      const next = { ...old, ...clean };
+      await tx(["cardio"], (t) => t.objectStore("cardio").put(next));
+      Object.assign(old, next);
+      return { entry: old, prs: [] };
+    }
+    const prior = cardio.filter((c) => c.activity === clean.activity && c.date <= clean.date);
+    const entry = { ...clean, created_at: now };
+    await tx(["cardio"], (t) => addTo(t.objectStore("cardio"), entry));
+    cardio.push(entry);
+    const prs = [];
+    if (prior.length) {
+      const b = cardioBests(prior);
+      const sp = speedKmh(entry);
+      if (b.distance != null && entry.distance > b.distance) prs.push({ kind: "distance", value: entry.distance, previous: b.distance });
+      if (b.speed != null && sp != null && entry.duration >= 600 && sp > b.speed + 1e-9) prs.push({ kind: "speed", value: sp, previous: b.speed });
+      if (entry.duration > b.duration) prs.push({ kind: "duration", value: entry.duration, previous: b.duration });
+    }
+    return { entry, prs };
+  }
+
+  async function deleteCardio(id) {
+    cardio.find((c) => c.id === id) || fail("Session not found");
+    await tx(["cardio"], (t) => t.objectStore("cardio").delete(id));
+    cardio = cardio.filter((c) => c.id !== id);
+  }
+
   // ---------- export / import ----------
   // Self-describing JSON: readable by a person, an AI agent, or this app's Import.
   function exportJSON() {
@@ -396,6 +501,8 @@ const DB = (() => {
         "reps is set for 'reps' exercises, duration_sec for 'time' exercises; the other is null. " +
         "date is the local calendar day of the workout. " +
         "`body`: one entry per day with body weight in kg and circumference measurements in cm (site keys are described in body_sites). " +
+        "`cardio`: one entry per cardio session (treadmill, cycle, etc.): duration_sec, distance_km, avg_speed_kmh (derived from distance and time), " +
+        "incline_pct (treadmill only), level (resistance on bike/rower/elliptical/stepper), avg_hr_bpm, max_hr_bpm, calories (kcal). " +
         "Missing values were not measured that day.",
       categories: CATEGORIES,
       exercises: exercises.map((e) => ({ name: e.name, category: e.category, type: e.type })),
@@ -414,6 +521,19 @@ const DB = (() => {
       }),
       body_sites: BODY_SITES,
       body: listBody().map((b) => ({ date: b.date, weight_kg: b.weight, measurements_cm: b.measurements })),
+      cardio_activities: CARDIO_ACTIVITIES.map((a) => a.name),
+      cardio: listCardio().map((c) => ({
+        date: c.date,
+        activity: c.activity,
+        duration_sec: c.duration,
+        distance_km: c.distance,
+        avg_speed_kmh: speedKmh(c) == null ? null : Math.round(speedKmh(c) * 100) / 100,
+        incline_pct: c.incline,
+        level: c.level,
+        avg_hr_bpm: c.avg_hr,
+        max_hr_bpm: c.max_hr,
+        calories: c.calories,
+      })),
     };
   }
 
@@ -431,6 +551,15 @@ const DB = (() => {
     const lines = [["date", "weight_kg", ...BODY_SITES.map((s) => `${s.key}_cm`)].join(",")];
     for (const b of listBody()) {
       lines.push([b.date, b.weight, ...BODY_SITES.map((s) => b.measurements[s.key])].map(csvCell).join(","));
+    }
+    return lines.join("\n") + "\n";
+  }
+
+  function exportCardioCSV() {
+    const lines = ["date,activity,duration_sec,distance_km,avg_speed_kmh,incline_pct,level,avg_hr_bpm,max_hr_bpm,calories"];
+    for (const c of exportJSON().cardio) {
+      lines.push([c.date, c.activity, c.duration_sec, c.distance_km, c.avg_speed_kmh, c.incline_pct, c.level, c.avg_hr_bpm, c.max_hr_bpm, c.calories]
+        .map(csvCell).join(","));
     }
     return lines.join("\n") + "\n";
   }
@@ -470,7 +599,18 @@ const DB = (() => {
       } catch (e) { fail(`Body entry ${i + 1}: ${e.message}`); }
     }) : null;
 
-    const stores = replaceBody ? ["exercises", "sets", "body"] : ["exercises", "sets"];
+    // Cardio arrived in export v3; older backups have none, so they leave your cardio log alone.
+    const replaceCardio = Array.isArray(data.cardio);
+    const cardioRows = replaceCardio ? data.cardio.map((c, i) => {
+      try {
+        return { ...cleanCardio({ date: c.date, activity: c.activity, duration: c.duration_sec, distance: c.distance_km, incline: c.incline_pct,
+          level: c.level, avg_hr: c.avg_hr_bpm, max_hr: c.max_hr_bpm, calories: c.calories }), created_at: new Date().toISOString() };
+      } catch (e) { fail(`Cardio entry ${i + 1}: ${e.message}`); }
+    }) : null;
+
+    const stores = ["exercises", "sets"];
+    if (replaceBody) stores.push("body");
+    if (replaceCardio) stores.push("cardio");
     await tx(stores, (t) => {
       const es = t.objectStore("exercises"), ss = t.objectStore("sets");
       es.clear();
@@ -487,18 +627,25 @@ const DB = (() => {
         bs.clear();
         bodyRows.forEach((b) => bs.put(b));
       }
+      if (replaceCardio) {
+        const cs = t.objectStore("cardio");
+        cs.clear();
+        cardioRows.forEach((r) => addTo(cs, r));
+      }
     });
     exercises = exs;
     sets = rows.map((r) => r.row);
     if (replaceBody) body = bodyRows;
-    return { exercises: exs.length, sets: sets.length, body: body.length };
+    if (replaceCardio) cardio = cardioRows;
+    return { exercises: exs.length, sets: sets.length, body: body.length, cardio: cardio.length };
   }
 
   return {
     init, listExercises, createExercise, deleteExercise, lastSession,
     listSets, addSets, updateSet, deleteSet, listWorkouts, progressSessions,
     listBody, getBody, saveBody, deleteBody,
-    exportJSON, exportCSV, exportBodyCSV, importJSON,
-    categories: CATEGORIES, bodySites: BODY_SITES,
+    listCardio, listCardioOn, getCardio, saveCardio, deleteCardio, cardioDates,
+    exportJSON, exportCSV, exportBodyCSV, exportCardioCSV, importJSON,
+    categories: CATEGORIES, bodySites: BODY_SITES, cardioActivities: CARDIO_ACTIVITIES,
   };
 })();

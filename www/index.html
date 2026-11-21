@@ -11,6 +11,7 @@
   <script src="db.js" defer></script>
   <script src="app.js" defer></script>
   <script src="body.js" defer></script>
+  <script src="cardio.js" defer></script>
 </head>
 <body>
 
@@ -142,6 +143,69 @@
       </div>
     </section>
 
+    <!-- CARDIO -->
+    <section id="view-cardio" class="view" hidden>
+      <div class="view-head">
+        <h2 class="view-title">Cardio</h2>
+      </div>
+
+      <div class="card cardio-entry">
+        <div class="date-nav compact">
+          <button class="icon-btn" id="cardio-prev" aria-label="Previous day">‹</button>
+          <button class="date-label" id="cardio-day-label"></button>
+          <button class="icon-btn" id="cardio-next" aria-label="Next day">›</button>
+          <input type="date" id="cardio-picker" class="visually-hidden" tabindex="-1">
+        </div>
+        <div class="cats" id="cardio-acts"></div>
+        <form id="form-cardio" novalidate>
+          <div class="cardio-grid">
+            <label class="meas" data-f="duration">Time (min or m:ss)
+              <input name="duration" inputmode="text" autocomplete="off"></label>
+            <label class="meas" data-f="distance">Distance (km)
+              <input name="distance" inputmode="decimal" autocomplete="off"></label>
+            <label class="meas" data-f="speed">Avg speed (km/h)
+              <input name="speed" inputmode="decimal" autocomplete="off"></label>
+            <label class="meas" data-f="incline">Incline (%)
+              <input name="incline" inputmode="decimal" autocomplete="off"></label>
+            <label class="meas" data-f="level">Resistance level
+              <input name="level" inputmode="decimal" autocomplete="off"></label>
+            <label class="meas" data-f="avg_hr">Avg heart rate (bpm)
+              <input name="avg_hr" inputmode="numeric" autocomplete="off"></label>
+            <label class="meas" data-f="max_hr">Max heart rate (bpm)
+              <input name="max_hr" inputmode="numeric" autocomplete="off"></label>
+            <label class="meas" data-f="calories">Calories (kcal)
+              <input name="calories" inputmode="numeric" autocomplete="off"></label>
+          </div>
+          <p class="muted small" id="cardio-hint"></p>
+          <p class="error" id="cardio-error"></p>
+          <div class="body-actions">
+            <button type="button" class="btn ghost danger" id="cardio-delete" hidden>Delete</button>
+            <button type="button" class="btn ghost" id="cardio-cancel" hidden>Cancel</button>
+            <button type="submit" class="btn primary big" id="cardio-save">Save</button>
+          </div>
+        </form>
+        <p class="muted small footnote">Only time is required. Enter any two of time, distance and speed and the third is filled in. Heart rate is optional: it shows whether you get faster at the same effort.</p>
+      </div>
+
+      <div class="section-title day-title" id="cardio-day-title"></div>
+      <div id="cardio-day"></div>
+
+      <div class="card">
+        <div class="card-title">Progress <span class="muted small">last 30 days</span></div>
+        <div class="cats lift-filter" id="cardio-filter"></div>
+        <div id="cardio-kpis"></div>
+        <p class="insight" id="cardio-insight" hidden></p>
+        <div class="range-row" id="cardio-metric"></div>
+        <div class="chart-box" id="cardio-chart-box"><canvas id="chart-cardio"></canvas></div>
+        <div id="cardio-bests"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Recent sessions</div>
+        <div id="cardio-history"></div>
+      </div>
+    </section>
+
     <!-- BODY -->
     <section id="view-body" class="view" hidden>
       <div class="view-head">
@@ -203,6 +267,7 @@
 
   <nav class="tabbar">
     <button class="tab active" data-view="log"><span class="tab-ico">＋</span>Log</button>
+    <button class="tab" data-view="cardio"><span class="tab-ico">♥</span>Cardio</button>
     <button class="tab" data-view="history"><span class="tab-ico">☰</span>History</button>
     <button class="tab" data-view="stats"><span class="tab-ico">↗</span>Progress</button>
     <button class="tab" data-view="body"><span class="tab-ico">◎</span>Body</button>
@@ -282,6 +347,7 @@
     <button class="btn block primary" value="json">Export JSON <span class="btn-sub">full backup incl. body · best for AI agents</span></button>
     <button class="btn block" value="csv">Export workouts CSV <span class="btn-sub">one row per set · opens in Sheets/Excel</span></button>
     <button class="btn block" value="bodycsv">Export body CSV <span class="btn-sub">one row per day · weight + measurements</span></button>
+    <button class="btn block" value="cardiocsv">Export cardio CSV <span class="btn-sub">one row per session · speed, incline, heart rate</span></button>
     <button class="btn block ghost" value="import" formnovalidate>Restore from JSON backup…</button>
     <input type="file" id="import-file" accept="application/json,.json" hidden>
     <p class="error" id="data-error"></p>

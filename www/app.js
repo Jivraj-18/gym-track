@@ -99,6 +99,7 @@ function showView(name) {
   if (name === "stats") loadProgress();
   if (name === "log") loadDay();
   if (name === "body") Body.load();
+  if (name === "cardio") Cardio.load();
 }
 
 // =====================================================================
@@ -450,13 +451,14 @@ function loadHistory(reset) {
     $("#history-list").innerHTML = `<div class="empty">No workouts yet. Your sessions will show up here.</div>`;
   }
   $("#history-list").insertAdjacentHTML("beforeend", workouts.map((w) => `
-    <button class="hist" data-date="${w.date}">
+    <button class="hist" data-date="${w.date}" data-cardio-only="${w.sets ? "" : "1"}">
       <div class="hist-top">
         <span class="hist-date">${prettyDate(w.date, { long: true })}</span>
-        <span class="muted small">${w.sets} sets</span>
+        <span class="muted small">${[w.sets ? `${w.sets} sets` : "", w.cardio.length ? "cardio" : ""].filter(Boolean).join(" · ")}</span>
       </div>
-      <div class="hist-meta">${w.exercises} exercise${w.exercises > 1 ? "s" : ""}</div>
-      <div class="tags">${w.categories.map((c) => `<span class="tag" style="--cat:${catVar(c)}">${esc(c)}</span>`).join("")}</div>
+      ${w.exercises ? `<div class="hist-meta">${w.exercises} exercise${w.exercises > 1 ? "s" : ""}</div>` : ""}
+      <div class="tags">${w.categories.map((c) => `<span class="tag" style="--cat:${catVar(c)}">${esc(c)}</span>`).join("")}${
+        w.cardio.map((c) => `<span class="tag" style="--cat:var(--c-cardio)">${esc(c.activity)} ${fmtDur(c.duration)}${c.distance != null ? ` · ${num(c.distance, 2)} km` : ""}</span>`).join("")}</div>
     </button>`).join(""));
   if (workouts.length) state.historyBefore = workouts[workouts.length - 1].date;
   $("#history-more").hidden = workouts.length < 20;
@@ -560,6 +562,7 @@ function renderWeek() {
 
   const week = sessions.filter((s) => s.date >= mon && s.date <= sun);
   const days = new Set(week.map((s) => s.date));
+  for (const d of DB.cardioDates()) if (d >= mon && d <= sun) days.add(d); // a cardio-only day still counts as a workout
   $("#week-done").textContent = days.size;
   $("#week-goal").textContent = g.workouts;
   $("#week-days").innerHTML = ["M", "T", "W", "T", "F", "S", "S"].map((l, i) => {
@@ -602,7 +605,7 @@ function renderWeek() {
 }
 
 function weekStreak(sessions) {
-  const weeks = new Set(sessions.map((s) => mondayOf(s.date)));
+  const weeks = new Set([...sessions.map((s) => s.date), ...DB.cardioDates()].map(mondayOf));
   const thisMon = mondayOf(todayStr());
   let wk = weeks.has(thisMon) ? thisMon : addDays(thisMon, -7); // an empty current week doesn't break it yet
   let n = 0;
@@ -748,13 +751,15 @@ function renderHeatmap() {
   const t = todayStr();
   const perDay = new Map();
   for (const s of state.progress.sessions) perDay.set(s.date, (perDay.get(s.date) || 0) + s.sets);
+  const cardioDays = DB.cardioDates();
   const start = addDays(mondayOf(t), -15 * 7);
   const cells = [];
   for (let i = 0; i < 16 * 7; i++) {
     const d = addDays(start, i);
     const n = perDay.get(d) || 0;
-    const lvl = d > t ? "future" : n === 0 ? "" : n < 10 ? "l1" : n < 20 ? "l2" : "l3";
-    cells.push(`<div class="cell ${lvl} ${d === t ? "today" : ""}" title="${d}: ${n} sets"></div>`);
+    const cardio = cardioDays.has(d);
+    const lvl = d > t ? "future" : n === 0 ? (cardio ? "l1" : "") : n < 10 ? "l1" : n < 20 ? "l2" : "l3";
+    cells.push(`<div class="cell ${lvl} ${d === t ? "today" : ""}" title="${d}: ${n} sets${cardio ? " + cardio" : ""}"></div>`);
   }
   $("#heatmap").innerHTML = cells.join("");
 }
@@ -823,9 +828,10 @@ function openData() {
   const w = DB.listWorkouts({ limit: 100000 });
   const nSets = w.reduce((a, x) => a + x.sets, 0);
   const nBody = DB.listBody().length;
+  const nCardio = DB.listCardio().length;
   $("#data-summary").textContent = (w.length
-    ? `${w.length} workouts · ${nSets} sets · since ${shortDate(w[w.length - 1].date)} ${parseYmd(w[w.length - 1].date).getFullYear()}`
-    : "No workouts logged yet.") + (nBody ? ` · ${nBody} body entries` : "");
+    ? `${w.length} workout days · ${nSets} sets · since ${shortDate(w[w.length - 1].date)} ${parseYmd(w[w.length - 1].date).getFullYear()}`
+    : "No workouts logged yet.") + (nCardio ? ` · ${nCardio} cardio sessions` : "") + (nBody ? ` · ${nBody} body entries` : "");
   $("#data-error").textContent = "";
   $("#dlg-data").showModal();
 }
@@ -843,6 +849,8 @@ async function onDataSubmit(e) {
     } else if (action === "csv") {
       await saveFile(`gym-log-${stamp}.csv`, DB.exportCSV(), "text/csv");
       store.set("gl_last_export", stamp);
+    } else if (action === "cardiocsv") {
+      await saveFile(`gym-log-cardio-${stamp}.csv`, DB.exportCardioCSV(), "text/csv");
     } else if (action === "bodycsv") {
       await saveFile(`gym-log-body-${stamp}.csv`, DB.exportBodyCSV(), "text/csv");
     } else if (action === "import") {
@@ -861,15 +869,17 @@ async function onImportFile(e) {
     let data;
     try { data = JSON.parse(await file.text()); } catch { throw new Error("That file isn't valid JSON"); }
     const n = Array.isArray(data?.sets) ? data.sets.length : 0;
-    const nb = Array.isArray(data?.body) ? `, ${data.body.length} body entries` : "";
+    const nb = (Array.isArray(data?.body) ? `, ${data.body.length} body entries` : "") +
+      (Array.isArray(data?.cardio) ? `, ${data.cardio.length} cardio sessions` : "");
     if (!confirm(`Replace everything on this phone with this backup (${n} sets${nb})?\n\nYour current log will be overwritten.`)) return;
     const res = await DB.importJSON(data);
     $("#dlg-data").close();
     state.selectedEx = null;
     loadExercises();
     loadDay();
-    toast(`Restored ${res.sets} sets, ${res.exercises} exercises${res.body ? `, ${res.body} body entries` : ""}`);
+    toast(`Restored ${res.sets} sets, ${res.exercises} exercises${res.cardio ? `, ${res.cardio} cardio sessions` : ""}${res.body ? `, ${res.body} body entries` : ""}`);
     if (!$("#view-body").hidden) Body.load();
+    if (!$("#view-cardio").hidden) Cardio.load();
   } catch (err) {
     $("#data-error").textContent = err.message;
   }
@@ -931,6 +941,10 @@ function wire() {
   $("#history-list").addEventListener("click", (e) => {
     const h = e.target.closest("[data-date]");
     if (!h) return;
+    if (h.dataset.cardioOnly) {
+      Cardio.showDate(h.dataset.date);
+      return showView("cardio");
+    }
     state.date = h.dataset.date;
     showView("log");
   });

@@ -6,9 +6,10 @@ An offline Android workout tracker. Log sets, reps and weight per exercise betwe
 - **Five categories:** Legs, Arms & Shoulders, Pull, Push, Abs, with 29 starter exercises. Add or remove your own.
 - **Rep and timed exercises.** Each exercise tracks either weight × reps or time (Plank, Side Plank, Wall Sit, Dead Hang, or any you add as "Time"). Timed exercises have a hold timer: 3-second get-ready countdown, buzz at your target, and Stop fills in the time.
 - **Body tab.** Daily body weight plus optional circumference measurements (neck, shoulders, chest, waist, belly, hips, left/right bicep, forearm, thigh, calf; pick which ones you track). Shows your 7-day average weight, change vs last week, 4-week trend in kg/week, and per-measurement change over a month and since you started.
+- **Cardio tab.** Log treadmill, cycle, outdoor run, walk, rowing, elliptical, stair climber or other sessions. Only **time** is required; everything else is optional: distance, average speed (enter any two of time / distance / speed and the third fills in), treadmill **incline %**, a **resistance level** for bike/rower/elliptical/stepper, **average and max heart rate**, and calories. It pre-fills from your last session of that activity. Shows 30-day totals vs the previous 30, a speed/distance/time chart (with a dashed heart-rate line when you log it), your bests, and a heart-rate efficiency note ("faster at the same or lower heart rate" means you're getting fitter). Cardio days count toward your weekly workouts, streak, heatmap and History. Log new bests get a 🏆.
 - **Fast logging.** Pick exercise → sets/reps/weight with big +/− buttons → **Add sets**. It pre-fills from your last session and shows "Last: 3×8 @ 60 kg · Best: 65 kg × 8". Logging a new best gives a 🏆 PR alert.
 - **Progress screen** built around the questions you have at the gym (see below).
-- **Backup & export** to JSON (full backup, self-describing for agents) or CSV (one row per set), through Android's share sheet: Drive, Gmail, Files, WhatsApp, etc. **Restore** from a JSON backup.
+- **Backup & export** to JSON (full backup, self-describing for agents) or CSV (one row per set), through Android's share sheet: Drive, Gmail, Files, WhatsApp, etc. **Restore** from a JSON backup. Cardio has its own CSV export.
 
 ## Install on your phone
 
@@ -91,3 +92,11 @@ After changing the icon images in `assets/`, run `npm run icons`.
 
 ### Signing key
 The repo includes a signing key with a simple password so builds are reproducible and updates install cleanly. That's fine for a personal app; if the repo is public and you'd rather keep the key private, create your own keystore, store it as a GitHub secret, and set `GYMLOG_KEYSTORE` / `GYMLOG_KEYSTORE_PASSWORD` in the workflow. Note that switching keys means one uninstall/reinstall, so export a backup first.
+
+and a `cardio` list, one entry per session (`null` = not recorded):
+
+```json
+{ "date": "2026-11-21", "activity": "Treadmill", "duration_sec": 1800, "distance_km": 4.5, "avg_speed_kmh": 9, "incline_pct": 2, "level": null, "avg_hr_bpm": 148, "max_hr_bpm": 171, "calories": 320 }
+```
+
+`incline_pct` is treadmill-only; `level` is the resistance setting on bike, rower, elliptical and stepper. Backups from before cardio existed restore fine and leave your cardio log untouched.
